@@ -1,0 +1,28 @@
+<html>
+    <head>
+        <link href="../gridtable/css/GridTable.css" rel="stylesheet">
+        <style>
+            .content{
+                padding: 50px 0px 0px 50px;
+            }
+        </style>
+        <script src="../gridtable/vanilla/GridTable.js"></script>
+        <script src="./data.js" charset="UTF-8"></script>
+        <script>
+
+            window.onload = function(){
+                const target = document.getElementById("tableArea");
+                const data = {header:header, rows: rows};
+                const grid = new GridTable(target, data);
+            }
+
+        </script>
+    </head>
+    <body>
+        <div class="container">
+            <div class="content">
+                <div id="tableArea"></div>
+            </div>
+        </div>
+    </body>
+</html>

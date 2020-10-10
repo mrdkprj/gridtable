@@ -1,0 +1,225 @@
+.gtbl-container{
+    overflow: hidden;
+    display:inline-block;
+}
+
+.gtbl{
+    display:table;
+    font-size: 12px;
+    table-layout: fixed;
+    position: relative;
+    width: 0;
+}
+
+.gtbl-row {
+    display:table-row;
+}
+
+.gtbl-row .gtbl-row-header-cell,
+.gtbl-row .gtbl-value-cell,
+.gtbl-row .gtbl-col-header-cell,
+.gtbl-row .gtbl-header-cell {
+    display:table-cell;
+}
+
+.stick{
+    position:sticky;
+    top:0;
+    z-index: 1000;
+}
+
+.gtbl-hidden-row-header{
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    font-size: 12px;
+    height: 27px;
+    table-layout: fixed;
+    display: table;
+    width: 0;
+}
+
+.gtbl-hidden-col-header{
+    z-index: 1000;
+    font-size: 12px;
+    width:20px;
+    float: left;
+    display: block;
+}
+
+.gtbl-header-cell {
+    background-color: #eee;
+    text-align: center;
+    color: #000000;
+    white-space: nowrap;
+}
+
+.gtbl-col-header-cell{
+    border-top: solid 1px #aaa;
+    border-right: solid 1px #aaa;
+    border-bottom: solid 1px #aaa;
+    /*padding: 4px 16px;*/
+    padding: 4px 4px;
+    overflow: hidden;
+}
+
+.gtbl-row-header-cell{
+    border-right: solid 1px #aaa;
+    border-bottom: solid 1px #aaa;
+    border-left: 1px solid #aaa;
+    user-select: none;
+}
+
+.gtbl-corner-cell{
+    border-top: solid 1px #aaa;
+    border-left: 1px solid #aaa;
+    border-right: solid 1px #aaa;
+    border-bottom: solid 1px #aaa;
+    z-index: 10001;
+    top:0;
+    left:0;
+}
+
+.node-container{
+    display: table-row-group;
+}
+
+.gtbl-value-cell{
+    border-top-width: 0;
+    border-left-width: 0;
+    border-right: 1px solid #ccc;
+    border-bottom: 1px solid #ccc;
+    line-height: 21px;
+    padding: 0 4px;
+    background-color: #fff;
+    vertical-align: top;
+    overflow: hidden;
+    outline-width: 0;
+    /*white-space: pre-wrap;*/
+    white-space: pre;
+    user-select: none;
+}
+
+.current {
+    outline: 2px solid #7000ff;
+    outline-offset: -1px;
+}
+
+.row-highlight{
+    background-color: #ddd;
+}
+
+.selectable{
+    user-select: text;
+    outline: 1px solid #7000ff;
+    outline-offset: -1px;
+}
+
+.highlight{
+    background-color: rgb(112, 0, 255,0.1);
+}
+
+.sort-link{
+    cursor: pointer;
+}
+
+.col-slidebar{
+    cursor: col-resize;
+    width: 5px;
+    height: 100%;
+    position: absolute;
+    right: 0;
+    top: 0;
+}
+
+.col-slidebar:hover{
+    cursor:col-resize;
+    border-right:1px solid red;
+    border-left:1px solid red;
+    padding:0;
+    margin:0;
+}
+
+.row-slidebar{
+    cursor: row-resize;
+    width: 100%;
+    height: 3px;
+    position: absolute;
+    left: 0;
+    bottom: 0;
+}
+
+.row-slidebar:hover{
+    cursor:row-resize;
+    border-top:1px solid red;
+    border-bottom:1px solid red;
+    padding:0;
+    margin:0;
+}
+
+.noselect{
+    user-select: none;
+}
+
+.focus-holder,
+.input-holder{
+    position: fixed;
+    top: -100px;
+    left: -100px;
+}
+
+.cell-editor{
+    border: none;
+    padding: 0px 4px;
+    resize: none;
+    outline: none;
+    line-height: 21px;
+    font-family:Verdana,Arial,sans-serif !important;
+    font-size: 12px !important;
+    overflow: hidden;
+    white-space: pre;
+    display: block;
+    /*outline: 2px solid #7000ff;
+    outline-offset: -1px;*/
+}
+
+.clone-header{
+    position: fixed;
+    top: -100px;
+    left: -100px;
+    display: table-cell;
+    background-color: #ddd;
+    text-align: center;
+    color: #000000;
+    border-right: solid 1px #aaa;
+    border-bottom: solid 1px #aaa;
+    border-left: 1px solid #aaa;
+    user-select: none;
+    white-space: nowrap;
+    font-family:Verdana,Arial,sans-serif !important;
+    font-size: 12px !important;
+    z-index: 999;
+}
+
+.calc{
+    position: fixed;
+    top:-100px;
+    left:-100px;
+    display: inline-block;
+    font-family:Verdana,Arial,sans-serif !important;
+    font-size: 12px !important;
+    border-top-width: 0;
+    border-left-width: 0;
+    border-right: 1px solid #ccc;
+    border-bottom: 1px solid #ccc;
+    line-height: 21px;
+    padding: 0 4px;
+    vertical-align: top;
+    overflow: hidden;
+    outline-width: 0;
+    white-space: pre;
+}
+
+.row-number{
+    pointer-events: none;
+}
