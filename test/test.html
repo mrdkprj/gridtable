@@ -1,28 +1,47 @@
 <html>
     <head>
-        <link href="../gridtable/css/GridTable.css" rel="stylesheet">
         <style>
-            .content{
-                padding: 50px 0px 0px 50px;
-            }
+
         </style>
+        <link href="../gridtable/css/GridTable.css" rel="stylesheet">
+        <link href="../tab/css/tab.css" rel="stylesheet">
         <script src="../gridtable/vanilla/GridTable.js"></script>
+        <script src="../gridtable/jquery/jquery-1.11.2.min.js"></script>
+        <!--
+        <script src="../gridtable/vanilla/GridTable.js"></script>
+        <script src="../gridtable/jquery/GridTable.js"></script>
+        -->
+        <script src="../tab/tab.js"></script>
         <script src="./data.js" charset="UTF-8"></script>
         <script>
+            const nm = "Tab";
+            var el;
+            var tab;
 
             window.onload = function(){
-                const target = document.getElementById("tableArea");
-                const data = {header:header, rows: rows};
-                const grid = new GridTable(target, data);
+                el = document.getElementById("tabarea");
+                tb = new Tab(el, nm, nm);
+                addTb();
+            }
+
+            function addTb(){
+                var t = tb.addTab(nm);
+                tb.activate(t.tabIndex);
+                const div = document.createElement("div");
+                t.content.appendChild(div);
+                const data = {header:header, rows:rows};
+                const grid = new GridTable(div, data);
+
             }
 
         </script>
+
     </head>
     <body>
-        <div class="container">
-            <div class="content">
-                <div id="tableArea"></div>
-            </div>
+        <div>
+            <button onclick="addTb(1);">Click me</button>
+        </div>
+        <div id="tabarea">
         </div>
     </body>
 </html>

@@ -49,7 +49,7 @@ class GridTable {
 		this.visibleNodes = null;
 		this.focusHolder = null;
 		this.cornerCell = null;
-		this.rowHeaderCells = [];
+		this.rowHeaderCellsVirtual = [];
 		this.columnHeaderCells = [];
 
 		this.current = null;
@@ -338,7 +338,7 @@ class GridTable {
 			rowHeaderCell.style.width = this.columnWidths[0] + "px";
 		}
 
-		this.rowHeaderCells.push(rowHeaderCell);
+		this.rowHeaderCellsVirtual.push(rowHeaderCell);
 
 		rowDiv.appendChild(rowHeaderCell);
 
@@ -367,7 +367,7 @@ class GridTable {
 	}
 
 	getVisibleChildNodes(){
-		this.rowHeaderCells = [];
+		this.rowHeaderCellsVirtual = [];
 
 		const fragment = document.createDocumentFragment();
 		new Array(this.visibleNodesCount)
@@ -376,54 +376,16 @@ class GridTable {
 		return fragment;
 	}
 
-	doVirtualScroll(e){
+	getRowDataAt(index){
+		return [index + 1].concat(this.rows[index]);
+	}
 
-		const getRowDataAt = (index) => {
-			return [index + 1].concat(this.rows[index]);
-		}
+	changeRowValue(rowArray, arrayIndex, keepCurrent){
 
 		const addRow = (index) => {
 			const newRow = this.createRow(index);
 			this.visibleNodes.push(newRow);
 			this.viewport.appendChild(newRow);
-		}
-
-		const changeRowValue = (rowArray, arrayIndex) => {
-
-			if(arrayIndex > this.visibleNodes.length - 1){
-				addRow(arrayIndex);
-			}
-
-			const rowIndex = arrayIndex + this.startNode;
-
-			rowArray.forEach((value, index) => {
-
-				const node = this.visibleNodes[arrayIndex].childNodes[index];
-				if(index == 0){
-					node.style.height = this.getChildHeight(rowIndex) + "px"
- 					node.childNodes[0].innerHTML = Util.toStringNullSafe(value);
-				}else{
-					node.innerHTML = Util.toStringNullSafe(value);
-				}
-
-				// Update current cell
-				if(shouldMarkAsCurrent(rowIndex, index)){
-					this.markCurrent(node, true);
-					if(this.currentSelectionMode == this.SelectionMode.ContentSelectable){
-						this.markCurrentCellAsSelectable();
-					}
-
-					if(this.isEditing){
-						this.prepareEditor();
-					}
-				}
-
-				// Update last selected cell
-				if(shouldChangeLast(rowIndex, index)){
-					this.last = this.toCellNode(node);
-				}
-
-			});
 		}
 
 		const shouldMarkAsCurrent = (rowIndex, colIndex) => {
@@ -460,6 +422,48 @@ class GridTable {
 			return true;
 		}
 
+		if(arrayIndex > this.visibleNodes.length - 1){
+			addRow(arrayIndex);
+		}
+
+		const rowIndex = arrayIndex + this.startNode;
+
+		rowArray.forEach((value, index) => {
+
+			const node = this.visibleNodes[arrayIndex].childNodes[index];
+			if(index == 0){
+				node.style.height = this.getChildHeight(rowIndex) + "px"
+				 node.childNodes[0].innerHTML = Util.toStringNullSafe(value);
+			}else{
+				node.innerHTML = Util.toStringNullSafe(value);
+			}
+
+			if(keepCurrent){
+				return;
+			}
+
+			// Update current cell
+			if(shouldMarkAsCurrent(rowIndex, index)){
+				this.markCurrent(node, true);
+				if(this.currentSelectionMode == this.SelectionMode.ContentSelectable){
+					this.markCurrentCellAsSelectable();
+				}
+
+				if(this.isEditing){
+					this.prepareEditor();
+				}
+			}
+
+			// Update last selected cell
+			if(shouldChangeLast(rowIndex, index)){
+				this.last = this.toCellNode(node);
+			}
+
+		});
+	}
+
+	doVirtualScroll(e){
+
 		this.prepareVirtualScroll(e.target.scrollTop, e.target.scrollLeft);
 
 		if(this.current){
@@ -475,13 +479,13 @@ class GridTable {
 
 		new Array(this.visibleNodesCount)
 			.fill(null)
-			.map((_, index) => getRowDataAt(index + this.startNode))
-			.forEach((row, rowIndex) => changeRowValue(row, rowIndex));
+			.map((_, index) => this.getRowDataAt(index + this.startNode))
+			.forEach((row, rowIndex) => this.changeRowValue(row, rowIndex));
 
 		if(this.visibleNodesCount < this.visibleNodes.length - 1){
 			const count = (this.visibleNodes.length - 1) - this.visibleNodesCount;
 			this.visibleNodes.splice(this.visibleNodesCount, count).forEach(el => el.remove());
-			this.rowHeaderCells.splice(this.visibleNodesCount, count);
+			this.rowHeaderCellsVirtual.splice(this.visibleNodesCount, count);
 		}
 
 		this.changeHighlightByScroll();
@@ -494,7 +498,7 @@ class GridTable {
 
 	alterTransform(){
 		this.viewport.style.transform = "translateY(" + this.nodeOffsetY + "px)";
-		this.rowHeaderCells.forEach(cell => cell.style.transform = "translateX(" + this.nodeOffsetX + "px)");
+		this.rowHeaderCellsVirtual.forEach(cell => cell.style.transform = "translateX(" + this.nodeOffsetX + "px)");
 	}
 
 	alterScrollPosition(top, left){
@@ -763,7 +767,7 @@ class GridTable {
 		this.current = this.toCellNode(cell);
 
 		this.current.Node.classList.add("current");
-		this.rowHeaderCells[this.index(cell.parentNode)].classList.add("row-highlight");
+		this.rowHeaderCellsVirtual[this.index(cell.parentNode)].classList.add("row-highlight");
 		this.columnHeaderCells[this.index(cell) - 1].classList.add("row-highlight");
 
 		if(preventScroll){
@@ -805,7 +809,7 @@ class GridTable {
 
 			const rowCells = row.querySelectorAll(".gtbl-value-cell");
 
-			this.rowHeaderCells[i].classList.add("row-highlight");
+			this.rowHeaderCellsVirtual[i].classList.add("row-highlight");
 
 			for (let j = cellStart; j <= cellEnd; j++) {
 
@@ -1007,7 +1011,7 @@ class GridTable {
 
 			const rowCells = row.querySelectorAll(".gtbl-value-cell");
 
-			this.rowHeaderCells[i].classList.add("row-highlight");
+			this.rowHeaderCellsVirtual[i].classList.add("row-highlight");
 
 			for (let j = cellStart; j <= cellEnd; j++) {
 
@@ -1104,7 +1108,7 @@ class GridTable {
 
 		columnCell.classList.add("row-highlight");
 		this.visibleNodes.forEach((row, index) => {
-			this.rowHeaderCells[index].classList.add("row-highlight");
+			this.rowHeaderCellsVirtual[index].classList.add("row-highlight");
 			row.childNodes[columnIndex].classList.add("highlight");
 		});
 
@@ -1117,14 +1121,14 @@ class GridTable {
 
 	highlightSelection(selectedCell){
 		selectedCell.classList.add("highlight");
-		this.rowHeaderCells[this.index(selectedCell.parentNode)].classList.add("row-highlight");
+		this.rowHeaderCellsVirtual[this.index(selectedCell.parentNode)].classList.add("row-highlight");
 		this.columnHeaderCells.forEach(cell => cell.classList.add("row-highlight"));
 	}
 
 	clearSelection(){
 		this.cornerCell.classList.remove("row-highlight");
 		this.viewport.querySelectorAll(".highlight").forEach(el => el.classList.remove("highlight"));
-		this.rowHeaderCells.forEach(cell => cell.classList.remove("row-highlight"));
+		this.rowHeaderCellsVirtual.forEach(cell => cell.classList.remove("row-highlight"));
 		this.columnHeaderCells.forEach(cell => cell.classList.remove("row-highlight"));
 	}
 
@@ -1272,7 +1276,7 @@ class GridTable {
 
 		if(this.currentResizeMode == this.ResizeMode.Row){
 			this.sizeBase.heights[this.resizingCell.Cell.RowIndex] = this.css(this.resizingCell.Node, "height");
-			this.rowHeaderCells[this.resizingCell.Cell.RowIndex].style.height = this.css(this.resizingCell.Node, "height")  + "px";
+			this.rowHeaderCellsVirtual[this.index(this.resizingCell.Node)].style.height = this.css(this.resizingCell.Node, "height")  + "px";
 			this.prepareVirtualScroll(this.rootNode.scrollTop, this.rootNode.scrollLeft, true);
 			this.container.style.height = this.totalContentHeight + "px";
 			this.alterTransform();
@@ -1451,7 +1455,7 @@ class GridTable {
 		if(this.isEditing){
 			this.endEdit();
 		}
-		this.selectRow(this.rowHeaderCells[this.index(this.current.Node.parentNode)]);
+		this.selectRow(this.rowHeaderCellsVirtual[this.index(this.current.Node.parentNode)]);
 	}
 
 	calculateEditorSize(value){
@@ -1555,7 +1559,7 @@ class GridTable {
 		this.inputHolder.style.top = position.top + this.headerHeight + "px";
 		this.inputHolder.style.left = position.left + "px";
 
-		const headerPositionLeft = (this.rowHeaderCells[this.index(this.current.Node.parentNode)].getBoundingClientRect().left - this.rootNode.getBoundingClientRect().left) + scrollLeft;
+		const headerPositionLeft = (this.rowHeaderCellsVirtual[this.index(this.current.Node.parentNode)].getBoundingClientRect().left - this.rootNode.getBoundingClientRect().left) + scrollLeft;
 		this.cloneHeader.style.position = "absolute";
 		this.cloneHeader.style.top = position.top + this.headerHeight + "px";
 		this.cloneHeader.style.left = headerPositionLeft + "px";
@@ -1780,7 +1784,7 @@ class GridTable {
 		this.last = this.toCellNode(cell);
 
 		if(this.current.Cell.equals(this.last.Cell)){
-			this.rowHeaderCells[this.index(cell.parentNode)].classList.add("row-highlight");
+			this.rowHeaderCellsVirtual[this.index(cell.parentNode)].classList.add("row-highlight");
 			this.columnHeaderCells[this.index(cell) - 1].classList.add("row-highlight");
 			return;
 		}
@@ -1912,38 +1916,14 @@ class GridTable {
 			this.sortMap[columnIndex] = "asc";
 		}
 
-		const getRowDataAt = (index) => {
-			return [index + 1].concat(this.rows[index]);
-		}
-
-		const addRow = (index) => {
-			const newRow = this.createRow(index);
-			this.visibleNodes.push(newRow);
-			this.viewport.appendChild(newRow);
-		}
-
-		const changeRowValue = (rowArray, arrayIndex) => {
-
-			if(arrayIndex > this.visibleNodes.length - 1){
-				addRow(arrayIndex);
-			}
-
-			rowArray.forEach((value, index) => {
-
-				const node = this.visibleNodes[arrayIndex][0].childNodes[index];
-				node.innerHTML = value;
-
-			});
-		}
-
-		this.sizeBase = Util.getSizeBase(this.header, this.rows, this.css(this.rootNode, "font"));
+		this.sizeBase = Util.getSizeBase(this.header, this.rows, this.css(this.rootNode,"font"), this.calculator, this.baseRowHeight);
 		this.prepareVirtualScroll(this.rootNode.scrollTop, this.rootNode.scrollLeft, true);
 		this.alterTransform();
 		this.updateVirtualSelection();
 		new Array(this.visibleNodesCount)
 			.fill(null)
-			.map((_, index) => getRowDataAt(index + this.startNode))
-			.forEach((row, rowIndex) => changeRowValue(row, rowIndex));
+			.map((_, index) => this.getRowDataAt(index + this.startNode))
+			.forEach((row, rowIndex) => this.changeRowValue(row, rowIndex));
 	}
 
 	destroy(){
