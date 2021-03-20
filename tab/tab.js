@@ -1,13 +1,16 @@
 class Tab{
 
-    constructor(rootElement, baseTabId, tabName){
+    constructor(){
+    }
+
+    create(rootElement, baseTabId, tabName){
 
         this.tabArea = document.createElement("div");
         this.tab = document.createElement("ul");
         this.tab.classList.add("tab-wrap");
         this.tabArea.appendChild(this.tab);
 
-        this.tabs = {};
+        this.tabElements = {};
         this.arr = [];
         this.tabIndex = -1;
         this.activeTabIndex = -1;
@@ -42,31 +45,41 @@ class Tab{
         li.setAttribute("tab-index", this.tabIndex);
         li.addEventListener("click", this._activate.bind(this));
 
-
         const a = document.createElement("span");
         a.classList.add("tab-anchor");
         a.innerText = this.baseTabName + this.tabIndex;
         const span = document.createElement("span");
         span.classList.add("closebtn-sm");
         span.innerHTML = "&#10006;";
+        span.addEventListener("click", this.closeTab.bind(this));
 
         li.appendChild(a);
         li.appendChild(span);
-        this.tab.prepend(li);
+        this.tab.insertBefore(li, this.addBtn);
 
         const content = document.createElement("div");
         content.classList.add("tab-content");
         content.id = tabContentId;
         this.tabArea.appendChild(content);
 
-        this.tabs[this.tabIndex] = li;
+        this.tabElements[this.tabIndex] = li;
 
-        return {
+        const tabData = {
             tab: li,
             content: content,
             tabIndex: this.tabIndex
+        };
+
+        if(this.afterAddTabCallback){
+            this.afterAddTabCallback(tabData);
         }
 
+        return tabData;
+
+    }
+
+    afterAddTab(callback){
+        this.afterAddTabCallback = callback;
     }
 
     _activate(e){
@@ -81,21 +94,43 @@ class Tab{
 
     activate(tabIndex){
 
-        if(this.tabs[tabIndex]){
+        if(this.tabElements[tabIndex]){
 
-            if(this.tabs[this.activeTabIndex]){
-                const currentLi = this.tabs[this.activeTabIndex];
+            if(this.tabElements[this.activeTabIndex]){
+                const currentLi = this.tabElements[this.activeTabIndex];
                 currentLi.classList.remove("active");
                 const currentContnet = document.getElementById(currentLi.getAttribute("tab-control"));
                 currentContnet.classList.remove("active-tab-content");
             }
 
             this.activeTabIndex = tabIndex;
-            const li = this.tabs[tabIndex];
+            const li = this.tabElements[tabIndex];
             li.classList.add("active");
             const content = document.getElementById(li.getAttribute("tab-control"));
             content.classList.add("active-tab-content");
         }
     }
 
+    closeTab(e){
+
+        if(Object.keys(this.tabElements).length > 1){
+            const li = e.target.parentElement;
+            const tabindex = parseInt(li.getAttribute("tab-index"))
+            const content = document.getElementById(li.getAttribute("tab-control"));
+            const prevLi = li.previousSibling;
+            const postLi = li.nextSibling;
+            li.parentElement.removeChild(li);
+            this.tabArea.removeChild(content);
+            delete this.tabElements[tabindex];
+
+            if(this.activeTabIndex == tabindex){
+                if(prevLi){
+                    this.activate(prevLi.getAttribute("tab-index"));
+                }else{
+                    this.activate(postLi.getAttribute("tab-index"));
+                }
+            }
+        }
+
+    }
 }
