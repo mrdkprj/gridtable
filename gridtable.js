@@ -1,5 +1,7 @@
 "use strict";
 
+import Dropdown from "./dropdown.js";
+
 const Direction = {
 	Up:1,
 	Down:2,
@@ -9,7 +11,20 @@ const Direction = {
 	End:6
 };
 
-class GridTable {
+const SelectionMode = {
+	Cell: 1,
+	Row: 2,
+	Column: 3,
+	All: 4,
+};
+
+const ResizeMode = {
+	None:0,
+	Column: 1,
+	Row:2,
+};
+
+export default class GridTable {
 
 	constructor(rootElement, params) {
 
@@ -19,7 +34,6 @@ class GridTable {
 
 		this.rows = params.rows;
 		this.header = params.header;
-		this._rows = null;
 
 		if(Array.isArray(params.readOnly)){
 			this.readOnly = false;
@@ -35,37 +49,38 @@ class GridTable {
 		this.totalContentHeight = 0;
 		this.childPositions = null;
 		this.columnPositions = null;
+		this.columnValues = null;
 		this.startNode = 0;
 		this.endNode = 0;
 		this.visibleNodesCount = 0;
+		this.filteredIndices = new Array(this.itemCount).fill(null).map((_,i) => i);
+		this.visibleIndices = this.filteredIndices;
+		this._prevFilteredIndices = null;
 		this.nodeOffsetY = 0;
-		this.nodeOffsetX = 0;
 		this.visibleViewportHeight = 0;
+		this.visibleNodes = null;
+		this.rowHeaderCellsVirtual = [];
+		this.columnHeaderCells = [];
 
 		this.calculationBaseStyles = {
 			baseHeight: this.baseRowHeight,
 			font: "12px Verdana,Arial,sans-serif",
 			lineHeight: 21,
 			borderWidth: 1,
+			padding:35
 		}
 		this.sizeBase = Util.getSizeBase(this.header, this.rows, this.calculationBaseStyles);
-		this.updateColumnWidths();
+		this.sizeInfo = {...this.sizeBase};
+		this.updateColumnInfo();
 
 		this.lastPostion = {X:0,Y:0};
+		this.scrollPosition = {X:0, Y:0};
 		this.scrollCallback = null;
-		this.filtered = false;
+		this.isFiltered = false;
+		this.isSorted = false;
 		this.isDragging = false;
 		this.isResizing = false;
 		this.isSearching = false;
-
-		this.container = null;
-		this.table = null;
-		this.table = null;
-		this.visibleNodes = null;
-		this.focusHolder = null;
-		this.cornerCell = null;
-		this.rowHeaderCellsVirtual = [];
-		this.columnHeaderCells = [];
 
 		this.current = null;
 		this.last = null;
@@ -77,51 +92,49 @@ class GridTable {
 		this.resizeAnimationFrame = null;
 		this.scrollInterval = null;
 
-		this.SelectionMode = {
-			Cell: 1,
-			Row: 2,
-			Column: 3,
-			All: 4,
-		}
-
-		this.ResizeMode = {
-			None:0,
-			Column: 1,
-			Row:2,
-		}
-
-		this.sortMap = {0: "asc"};
+		this.sortInfo = {order: 1, columnIndex: 0};
 
 		this.history = new EditHistory(this.rows);
 		this.searchUtil = new SearchUtil();
+		this.dropdown = new Dropdown(
+			this.rootNode,
+			{
+				afterDropdownClose: this.onDropdownClose.bind(this),
+				clearFilter:this.onDropdownClear.bind(this),
+			}
+		);
 
-		this.currentSelectionMode = this.SelectionMode.Cell;
-		this.currentResizeMode = this.ResizeMode.None;
-/*
-		this.viewport.style.height = this.rootHeight + "px";
-		this.viewport.style.overflow = "auto";
-		this.viewport.style.position = "relative";
-*/
+		this.currentSelectionMode = SelectionMode.Cell;
+		this.currentResizeMode = ResizeMode.None;
+
 		this.rootNode.style.height = "100%";
 		this.rootNode.style.position = "relative";
+		this.rootNode.style.overflow = "hidden";
+		this.rootNode.classList.add("gridtable");
 
-		document.addEventListener("mousedown", this.onDocumentMouseDown.bind(this));
-		document.addEventListener("mouseup", this.onDocumentMouseUp.bind(this));
-		document.addEventListener("copy" , this.onDocumentCopy.bind(this));
-		document.addEventListener("mousemove", this.onDocumentMouseMove.bind(this));
-		//this.viewport.addEventListener("scroll", this.onRootScroll.bind(this));
+		this.assignHandler(document, "mousedown", this.onDocumentMouseDown);
+		this.assignHandler(document, "mouseup", this.onDocumentMouseUp);
+		this.assignHandler(document, "copy", this.onDocumentCopy);
+		this.assignHandler(document, "mousemove", this.onDocumentMouseMove);
 
 		this.mouseoverEvent = document.createEvent("HTMLEvents");
 		this.mouseoverEvent.initEvent("mouseover", true, true);
 		this.mouseoverEvent.eventName = "mouseover";
 
-		//this.prepareVirtualScroll(this.viewport.scrollTop, this.viewport.scrollLeft, true);
-		this.prepareVirtualScroll(0, 0, true);
+		this.prepareVirtualScroll(0, true);
 		this.createGridTable();
 
 	}
 
-	prepareVirtualScroll(scrollTop, scrollLeft, reset){
+	assignHandler(target, event, callback){
+		if(this.rows == null || this.rows.length <= 0){
+			return;
+		}
+
+		target.addEventListener(event, callback.bind(this));
+	}
+
+	prepareVirtualScroll(scrollTop, reset){
 
 		const findEndNode = (nodePositions, startNode, itemCount, height) => {
 			let endNode;
@@ -134,38 +147,41 @@ class GridTable {
 			return endNode;
 		}
 
-		const getChildPositions = (itemCount) => {
+		const getChildPositions = (childCount) => {
 			const results = [0];
-			for (let i = 1; i < itemCount; i++) {
+
+			for(let i = 1; i < childCount; i++){
 				results.push(results[i - 1] + this.getChildHeight(i - 1));
 			}
+
 			return results;
 		}
 
 		const renderAhead = 20;
 
 		if(reset){
-			this.childPositions = getChildPositions(this.itemCount);
-			this.totalContentHeight = this.childPositions[this.itemCount - 1] + this.getChildHeight(this.itemCount - 1);
+			this.childPositions = getChildPositions(this.filteredIndices.length);
+			this.totalContentHeight = this.childPositions[this.filteredIndices.length - 1] + this.getChildHeight(this.filteredIndices.length - 1);
 		}
 
 		const firstVisibleNode = Util.findClosest(scrollTop, this.childPositions, this.itemCount);
 		const lastVisibleNode = findEndNode(this.childPositions, firstVisibleNode, this.itemCount, this.rootHeight);
 
 		this.startNode = Math.max(0, firstVisibleNode - renderAhead);
-		this.endNode = Math.min(this.itemCount - 1, lastVisibleNode + renderAhead);
+		const endNode = Math.min(this.itemCount - 1, lastVisibleNode + renderAhead);
 
-		this.visibleNodesCount = (this.endNode - this.startNode) + 1;
+		this.visibleNodesCount = (endNode - this.startNode) + 1;
+
+		this.visibleIndices = this.filteredIndices.slice(this.startNode, this.startNode + this.visibleNodesCount);
 
 		this.visibleViewportHeight = this.rootHeight - this.headerHeight;
 
 		this.nodeOffsetY = this.childPositions[this.startNode];
-		this.nodeOffsetX = scrollLeft;
 
 	}
 
 	getChildHeight(index){
-		return this.sizeBase.heights[index];
+		return this.sizeInfo.heights[index];
 	}
 
 	createGridTable(){
@@ -180,8 +196,8 @@ class GridTable {
 		const getCornerCell = () => {
 			const cornerCell = document.createElement("div");
 			cornerCell.classList.add("gtbl-header-cell", "gtbl-corner-cell");
-			cornerCell.style.width = this.columnWidths[0] + "px";
-			cornerCell.addEventListener("click", this.onCornerCellClick.bind(this));
+			cornerCell.style.width = this.rowHeaderWidth + "px";
+			this.assignHandler(cornerCell, "click", this.onCornerCellClick);
 			return cornerCell;
 		}
 
@@ -196,19 +212,29 @@ class GridTable {
 			this.header.forEach((item, index) => {
 				const header = document.createElement("div");
 				header.classList.add("gtbl-header-cell", "gtbl-col-header-cell");
-				header.style.width = this.columnWidths[index + 1] + "px";
-				header.addEventListener("click", this.onColumnHeaderCellClick.bind(this));
+				header.style.width = this.columnWidths[index] + "px";
+				this.assignHandler(header, "click", this.onColumnHeaderCellClick);
 
 				const link = document.createElement("a");
 				link.classList.add("sort-link");
 				link.textContent = item;
-				link.addEventListener("click", this.onColumnHeaderCellDblClick.bind(this));
-				header.appendChild(link);
+				this.assignHandler(link, "click", this.onSortLinkClick);
+
+				const sortIcon = document.createElement("span");
+				sortIcon.classList.add("sort-icon");
+
+				const filterIcon = document.createElement("div");
+				filterIcon.classList.add("filter-btn");
+				this.assignHandler(filterIcon, "click", this.onFilterColumnClick);
+				const arrow = document.createElement("div");
+				arrow.classList.add("arrow-down");
+				filterIcon.appendChild(arrow);
 
 				const slidebar = document.createElement("div");
 				slidebar.classList.add("col-slidebar");
-				slidebar.addEventListener("mousedown", this.onSlidebarMousedown.bind(this));
-				header.appendChild(slidebar);
+				this.assignHandler(slidebar, "mousedown", this.onSlidebarMousedown);
+
+				header.append(link, sortIcon, filterIcon, slidebar);
 
 				this.columnHeaderCells.push(header);
 				columnHeader.appendChild(header);
@@ -228,10 +254,10 @@ class GridTable {
 			const focusHolder = document.createElement("input");
 			focusHolder.classList.add("focus-holder");
 			focusHolder.type ='text';
-			focusHolder.addEventListener("keydown", this.onFocusHolderKeydown.bind(this));
-			focusHolder.addEventListener("keypress", this.onFocusHolderKeypress.bind(this));
-			focusHolder.addEventListener("keyup", this.onFocusHolderKeyUp.bind(this));
-			focusHolder.addEventListener("paste", this.onFocusHolderPaste.bind(this));
+			this.assignHandler(focusHolder, "keydown", this.onFocusHolderKeydown);
+			this.assignHandler(focusHolder, "keypress", this.onFocusHolderKeypress);
+			this.assignHandler(focusHolder, "keyup", this.onFocusHolderKeyUp);
+			this.assignHandler(focusHolder, "paste", this.onFocusHolderPaste);
 			return focusHolder;
 		}
 
@@ -239,10 +265,10 @@ class GridTable {
 			this.editor = document.createElement("textarea");
 			this.editor.spellcheck = false;
 			this.editor.classList.add("cell-editor");
-			this.editor.addEventListener("blur", this.onEditorBlur.bind(this));
-			this.editor.addEventListener("keydown", this.onEditorKeydown.bind(this));
-			this.editor.addEventListener("keypress", this.onEditorKeypress.bind(this));
-			this.editor.addEventListener("paste", this.onEditorPaste.bind(this))
+			this.assignHandler(this.editor, "blur", this.onEditorBlur);
+			this.assignHandler(this.editor, "keydown", this.onEditorKeydown);
+			this.assignHandler(this.editor, "keypress", this.onEditorKeypress);
+			this.assignHandler(this.editor, "paste", this.onEditorPaste)
 
 			const inputHolder = document.createElement("div");
 			inputHolder.classList.add("input-holder");
@@ -258,7 +284,7 @@ class GridTable {
 			const txt = document.createElement("textarea");
 			txt.spellcheck = false;
 			txt.classList.add("dialog-txt");
-			txt.addEventListener("keydown", this.onSearchDialogKeydown.bind(this));
+			this.assignHandler(txt, "keydown", this.onSearchDialogKeydown);
 
 			this.searchResultArea = document.createElement("div");
 			this.searchResultArea.classList.add("search-result");
@@ -269,31 +295,11 @@ class GridTable {
 
 			return dialog;
 		}
-/*
-		const header = getColumnHeader();
-		this.viewport.appendChild(header);
-		this.container = getContainer();
-		this.viewport.appendChild(this.container);
 
-		this.table = getTable();
-		this.container.appendChild(this.table);
-
-		this.table.appendChild(this.getVisibleChildNodes());
-		this.visibleNodes = Array.from(this.table.childNodes);
-
-		this.focusHolder = getFocusHolder();
-		this.viewport.appendChild(this.focusHolder);
-
-		this.inputHolder = getInputHolder();
-		this.viewport.appendChild(this.inputHolder);
-
-		this.dialog = getSearchDialog();
-		this.viewport.appendChild(this.dialog);
-*/
 		this.viewport = document.createElement("div");
 		this.viewport.style.height = this.rootHeight + "px";
 		this.viewport.classList.add("gtbl-viewport");
-		this.viewport.addEventListener("scroll", this.onRootScroll.bind(this));
+		this.assignHandler(this.viewport, "scroll", this.onRootScroll);
 
 		const header = getColumnHeader();
 		this.viewport.appendChild(header);
@@ -321,15 +327,13 @@ class GridTable {
 
 		const rowData = this.rows[rowIndex];
 
-		const isFirstRow = rowIndex == 0;
-
 		const rowDiv = document.createElement("div");
 		rowDiv.classList.add("gtbl-row", "gtbl-detail");
 
 		const rowHeaderCell = document.createElement("div");
 		rowHeaderCell.classList.add("gtbl-header-cell", "gtbl-row-header-cell");
 		rowHeaderCell.style.height = this.getChildHeight(rowIndex) + "px";
-		rowHeaderCell.addEventListener("click", this.onRowHeaderCellClick.bind(this));
+		this.assignHandler(rowHeaderCell, "click", this.onRowHeaderCellClick);
 
 		const rowNumber = document.createElement("span");
 		rowNumber.classList.add("row-number");
@@ -338,12 +342,10 @@ class GridTable {
 
 		const slidebar = document.createElement("div");
 		slidebar.classList.add("row-slidebar");
-		slidebar.addEventListener("mousedown", this.onRowSlidebarMousedown.bind(this));
+		this.assignHandler(slidebar, "mousedown", this.onRowSlidebarMousedown);
 		rowHeaderCell.appendChild(slidebar);
 
-		if(isFirstRow){
-			rowHeaderCell.style.width = this.columnWidths[0] + "px";
-		}
+		rowHeaderCell.style.width = this.rowHeaderWidth + "px";
 
 		this.rowHeaderCellsVirtual.push(rowHeaderCell);
 
@@ -355,14 +357,12 @@ class GridTable {
 			const cell = document.createElement("div");
 			cell.classList.add("gtbl-value-cell");
 			cell.textContent = Util.toStringNullSafe(cellvalue);
-			cell.addEventListener("mousedown", this.onCellMouseDown.bind(this));
-			cell.addEventListener("mouseup", this.onCellMouseUp.bind(this));
-			cell.addEventListener("mouseover", this.onCellMouseOver.bind(this));
-			cell.addEventListener("dblclick", this.onCellDblClick.bind(this));
+			this.assignHandler(cell, "mousedown", this.onCellMouseDown);
+			this.assignHandler(cell, "mouseup", this.onCellMouseUp);
+			this.assignHandler(cell, "mouseover", this.onCellMouseOver);
+			this.assignHandler(cell, "dblclick", this.onCellDblClick);
 
-			if(isFirstRow){
-				cell.style.width = this.columnWidths[cellIndex + 1] + "px";
-			}
+			cell.style.width = this.columnWidths[cellIndex] + "px";
 
 			fragment.appendChild(cell);
 
@@ -377,13 +377,21 @@ class GridTable {
 		this.rowHeaderCellsVirtual = [];
 
 		const fragment = document.createDocumentFragment();
-		new Array(this.visibleNodesCount)
-					.fill(null)
-					.forEach((_, index) => fragment.appendChild(this.createRow(index + this.startNode)));
+		this.visibleIndices.forEach((index) => fragment.appendChild(this.createRow(index)));
+
 		return fragment;
 	}
 
 	getRowDataAt(index){
+
+		if(this.isFiltered){
+			return [this._prevFilteredIndices.indexOf(index) + 1].concat(this.rows[index]);
+		}
+
+		if(this.isSorted){
+			return [this.filteredIndices.indexOf(index) + 1].concat(this.rows[index]);
+		}
+
 		return [index + 1].concat(this.rows[index]);
 	}
 
@@ -403,19 +411,11 @@ class GridTable {
 				}
 			}
 
-			if(!this.current){
-				return false;
-			}
+			if(!this.current) return false;
 
-			if(this.current.Cell.RowIndex != rowIndex){
-				return false;
-			}
+			if(this.current.Cell.RowIndex != rowIndex) return false;
 
-			if(this.current.Cell.ColumnIndex != colIndex - 1){
-				return false;
-			}
-
-
+			if(this.current.Cell.ColumnIndex != colIndex - 1) return false;
 
 			return true;
 		}
@@ -428,19 +428,11 @@ class GridTable {
 				}
 			}
 
-			if(!this.last){
-				return false;
-			}
+			if(!this.last) return false;
 
-			if(this.last.Cell.RowIndex != rowIndex){
-				return false;
-			}
+			if(this.last.Cell.RowIndex != rowIndex) return false;
 
-			if(this.last.Cell.ColumnIndex != colIndex - 1){
-				return false;
-			}
-
-
+			if(this.last.Cell.ColumnIndex != colIndex - 1) return false;
 
 			return true;
 		}
@@ -456,7 +448,7 @@ class GridTable {
 			const node = this.visibleNodes[arrayIndex].childNodes[index];
 			if(index == 0){
 				node.style.height = this.getChildHeight(rowIndex) + "px"
-				 node.childNodes[0].textContent = Util.toStringNullSafe(value);
+				node.childNodes[0].textContent = Util.toStringNullSafe(value);
 			}else{
 				node.textContent = Util.toStringNullSafe(value);
 			}
@@ -484,7 +476,7 @@ class GridTable {
 
 	doVirtualScroll(e){
 
-		this.prepareVirtualScroll(e.target.scrollTop, e.target.scrollLeft);
+		this.prepareVirtualScroll(e.target.scrollTop);
 
 		if(this.current){
 			this.clearCurrent();
@@ -496,16 +488,11 @@ class GridTable {
 
 		this.alterViewportOffset();
 
-		new Array(this.visibleNodesCount)
-			.fill(null)
-			.map((_, index) => this.getRowDataAt(index + this.startNode))
-			.forEach((row, rowIndex) => this.changeRowValue(row, rowIndex));
+		this.alterContent();
 
-		//if(this.visibleNodesCount < this.visibleNodes.length - 0){
-			const count = (this.visibleNodes.length - 0) - this.visibleNodesCount;
-			this.visibleNodes.splice(this.visibleNodesCount, count).forEach(el => el.remove());
-			this.rowHeaderCellsVirtual.splice(this.visibleNodesCount, count);
-		//}
+		const count = (this.visibleNodes.length - 0) - this.visibleNodesCount;
+		this.visibleNodes.splice(this.visibleNodesCount, count).forEach(el => el.remove());
+		this.rowHeaderCellsVirtual.splice(this.visibleNodesCount, count);
 
 		this.changeHighlightByScroll();
 
@@ -513,6 +500,11 @@ class GridTable {
 			this.scrollCallback.action(this.scrollCallback.args)
 			this.scrollCallback = null;
 		}
+	}
+
+	alterContent(keepCurrent){
+		this.visibleIndices.map(index => this.getRowDataAt(index))
+							.forEach((row, rowIndex) => this.changeRowValue(row, rowIndex, keepCurrent));
 	}
 
 	alterViewportOffset(){
@@ -717,13 +709,12 @@ class GridTable {
 		let scrollRequired = false;
 		let scrollPositionLeft = null;
 		let scrollPositionTop = null;
-		//const positionTop = this.childPositions[cellNode.Cell.RowIndex];
-		//const positionLeft = cellNode.Node.getBoundingClientRect().left;
+
 		const scrollTop = this.viewport.scrollTop;
-		const scrollLet = this.viewport.scrollLeft;
+		const scrollLeft = this.viewport.scrollLeft;
 
 		const positionTop = this.childPositions[cellNode.Cell.RowIndex];
-		const positionLeft = (this.viewport.getBoundingClientRect().left - scrollLet) + this.columnPositions[cellNode.Cell.ColumnIndex + 1];
+		const positionLeft = this.columnPositions[cellNode.Cell.ColumnIndex];
 
 		// hidden below
 		if(positionTop > scrollTop + this.visibleViewportHeight){
@@ -738,14 +729,14 @@ class GridTable {
 		}
 
 		// hidden left
-		if(scrollLet > positionLeft){
-			scrollPositionLeft = positionLeft - this.columnWidths[0];
+		if(scrollLeft > positionLeft){
+			scrollPositionLeft = positionLeft - this.rowHeaderWidth;
 			scrollRequired = true;
 		}
 
 		// hidden right
-		if(Util.css(this.viewport, "width") + scrollLet < positionLeft){
-			const position = positionLeft - (Util.css(this.viewport, "width") + scrollLet);
+		if(Util.css(this.viewport, "width") + scrollLeft < positionLeft){
+			const position = positionLeft - (Util.css(this.viewport, "width") + scrollLeft);
 			const barWidth = Util.css(this.viewport, "width") - this.viewport.clientWidth;
 			scrollPositionLeft = positionLeft - position + barWidth;
 			scrollRequired = true;
@@ -843,8 +834,9 @@ class GridTable {
 
 		let paddingValue = 0;
 
+		const cell = this.toCellNode(target).Cell;
 		const scrollLeft = this.viewport.scrollLeft;
-		const positionLeft = (target.getBoundingClientRect().left - this.viewport.getBoundingClientRect().left) + scrollLeft;
+		const positionLeft = this.columnPositions[cell.ColumnIndex]
 
 		if(this.lastPostion.X == positionLeft){
 			return;
@@ -852,32 +844,33 @@ class GridTable {
 
 		this.lastPostion.X = positionLeft;
 
-		if(scrollLeft + positionLeft - this.columnWidths[0] <= 0){
+		if(scrollLeft + positionLeft - this.rowHeaderWidth <= 0){
 			return;
 		}
 
-		if(this.viewport.scrollWidth == Util.css(target, "width") + positionLeft){
+		if(this.viewport.scrollWidth == positionLeft + this.columnWidths[cell.ColumnIndex]){
 			this.alterScrollPosition(null, this.viewport.scrollWidth);
 			return;
 		}
 
-		if(positionLeft - Util.css(target.previousElementSibling, "width") == 0){
+		if(scrollLeft > 0 && cell.ColumnIndex == 0){
 			this.alterScrollPosition(null, 0);
 			return;
 		}
 
 		if(scrollLeft >= positionLeft){
 			if(padding){
-				paddingValue = this.columnWidths[this.last.Cell.ColumnIndex]
+				paddingValue = this.columnWidths[this.last.Cell.ColumnIndex - 1]
 			}
-			this.alterScrollPosition(null, positionLeft - this.columnWidths[0] - paddingValue);
+
+			this.alterScrollPosition(null, positionLeft - this.rowHeaderWidth - paddingValue);
 			return;
 		}
 
-		if(scrollLeft + Util.css(this.viewport, "width") <= positionLeft + Util.css(target, "width") + this.getScrollbarHeight()){
-			const scrollby = ((positionLeft + Util.css(target, "width")) + this.getScrollbarHeight()) - (scrollLeft + Util.css(this.viewport, "width"));
+		if(scrollLeft + Util.css(this.viewport, "width") <= this.columnPositions[cell.ColumnIndex + 1] + this.getScrollbarHeight()){
+			const scrollby = (this.columnPositions[cell.ColumnIndex + 1] + this.getScrollbarHeight()) - (scrollLeft + Util.css(this.viewport, "width"));
 			if(padding){
-				paddingValue = this.columnWidths[this.last.Cell.ColumnIndex + 1]
+				paddingValue = this.columnWidths[this.last.Cell.ColumnIndex]
 			}
 			this.alterScrollPosition(null, scrollLeft + scrollby + paddingValue);
 			return;
@@ -889,8 +882,8 @@ class GridTable {
 
 		let paddingValue = 0;
 
-		const targetCellNode = this.toCellNode(target);
-		const positionTop = this.childPositions[targetCellNode.Cell.RowIndex]
+		const cell = this.toCellNode(target).Cell;
+		const positionTop = this.childPositions[cell.RowIndex]
 		const scrollTop = this.viewport.scrollTop;
 
 		if(this.lastPostion.Y == positionTop){
@@ -903,12 +896,12 @@ class GridTable {
 			return;
 		}
 
-		if(this.viewport.scrollHeight == Util.css(target, "height") + positionTop){
+		if(this.totalContentHeight == positionTop + this.getChildHeight(cell.RowIndex)){
 			this.alterScrollPosition(this.viewport.scrollHeight);
 			return;
 		}
 
-		if(positionTop - this.headerHeight == 0){
+		if(scrollTop > 0 && cell.RowIndex == 0){
 			this.alterScrollPosition(0);
 			return;
 		}
@@ -921,9 +914,8 @@ class GridTable {
 			return;
 		}
 
-		if(scrollTop + this.visibleViewportHeight <= positionTop + this.getChildHeight(targetCellNode.Cell.RowIndex) + this.getScrollbarHeight()){
-
-			const scrollby = (positionTop + this.getChildHeight(targetCellNode.Cell.RowIndex)) - (scrollTop + this.visibleViewportHeight) + this.getScrollbarHeight();
+		if(scrollTop + this.visibleViewportHeight <= this.childPositions[cell.RowIndex + 1] + this.getScrollbarHeight()){
+			const scrollby = (this.childPositions[cell.RowIndex + 1] + this.getScrollbarHeight()) - (scrollTop + this.visibleViewportHeight);
 
 			if(padding){
 				paddingValue = this.getChildHeight(this.last.Cell.RowIndex + 1);
@@ -945,21 +937,15 @@ class GridTable {
 
 		const changeHighlightRequired = () => {
 
-			if(this.currentSelectionMode == this.SelectionMode.All || this.currentSelectionMode == this.SelectionMode.Column){
+			if(this.currentSelectionMode == SelectionMode.All || this.currentSelectionMode == SelectionMode.Column){
 				return true;
 			}
 
-			if(this.bypassHighlightByScroll){
-				return false;
-			}
+			if(this.bypassHighlightByScroll) return false;
 
-			if(!this.current || !this.last){
-				return false;
-			}
+			if(!this.current || !this.last) return false;
 
-			if(this.current.Cell.equals(this.last.Cell)){
-				return false;
-			}
+			if(this.current.Cell.equals(this.last.Cell)) return false;
 
 			return true;
 
@@ -967,45 +953,33 @@ class GridTable {
 
 		const updateVirtualSelectionRequired = () => {
 
-			if(this.currentSelectionMode == this.SelectionMode.All || this.currentSelectionMode == this.SelectionMode.Column){
+			if(this.currentSelectionMode == SelectionMode.All || this.currentSelectionMode == SelectionMode.Column){
 				return true;
 			}
 
 			if(this.current.Cell.RowIndex >= this.last.Cell.RowIndex){
 
-				if(this.current.Cell.RowIndex < this.startNode){
-					return false;
-				}
+				if(this.current.Cell.RowIndex < this.startNode) return false;
 
-				if(this.last.Cell.RowIndex > this.startNode + this.visibleNodesCount - 1){
-					return false;
-				}
+				if(this.last.Cell.RowIndex > this.startNode + this.visibleNodesCount - 1) return false;
 
 				return true;
 
 			}else{
 
-				if(this.last.Cell.RowIndex < this.startNode){
-					return false;
-				}
+				if(this.last.Cell.RowIndex < this.startNode) return false;
 
-				if(this.current.Cell.RowIndex  > this.startNode + this.visibleNodesCount - 1){
-					return false;
-				}
+				if(this.current.Cell.RowIndex  > this.startNode + this.visibleNodesCount - 1) return false;
 
 				return true;
 			}
 		}
 
-		if(!changeHighlightRequired()){
-			return true;
-		}
+		if(!changeHighlightRequired()) return true;
 
 		this.clearSelection();
 
-		if(!updateVirtualSelectionRequired()){
-			return true;
-		}
+		if(!updateVirtualSelectionRequired()) return true;
 
 		this.updateVirtualSelection(this.last);
 
@@ -1014,11 +988,11 @@ class GridTable {
 		const cellStart = Math.min(this.virtualSelection.End.ColumnIndex, this.virtualSelection.Start.ColumnIndex);
 		const cellEnd = Math.max(this.virtualSelection.End.ColumnIndex, this.virtualSelection.Start.ColumnIndex);
 
-		if(this.currentSelectionMode == this.SelectionMode.All){
+		if(this.currentSelectionMode == SelectionMode.All){
 			this.cornerCell.classList.add("row-highlight");
 		}
 
-		if(this.currentSelectionMode == this.SelectionMode.Row){
+		if(this.currentSelectionMode == SelectionMode.Row){
 			this.columnHeaderCells.forEach(cell => cell.classList.add("row-highlight"));
 		}
 
@@ -1034,7 +1008,7 @@ class GridTable {
 
 				rowCells[j].classList.add("highlight");
 
-				if(this.currentSelectionMode != this.SelectionMode.Row){
+				if(this.currentSelectionMode != SelectionMode.Row){
 					this.columnHeaderCells[j].classList.add("row-highlight");
 				}
 			}
@@ -1044,7 +1018,7 @@ class GridTable {
 	updateVirtualSelection(target){
 
 		// All cell selection
-		if(this.currentSelectionMode == this.SelectionMode.All){
+		if(this.currentSelectionMode == SelectionMode.All){
 			this.virtualSelection.Start.RowIndex = 0;
 			this.virtualSelection.End.RowIndex = this.visibleNodesCount - 1;
 			this.virtualSelection.Start.ColumnIndex = 0;
@@ -1053,7 +1027,7 @@ class GridTable {
 		}
 
 		// Column selection
-		if(this.currentSelectionMode == this.SelectionMode.Column){
+		if(this.currentSelectionMode == SelectionMode.Column){
 			this.virtualSelection.Start.RowIndex = 0;
 			this.virtualSelection.End.RowIndex = this.visibleNodesCount - 1;
 			return;
@@ -1075,7 +1049,7 @@ class GridTable {
 
 	selectAll(){
 
-		this.currentSelectionMode = this.SelectionMode.All
+		this.currentSelectionMode = SelectionMode.All
 
 		this.cornerCell.classList.add("row-highlight");
 
@@ -1092,7 +1066,7 @@ class GridTable {
 
 	selectRow(rowHeaderCell){
 
-		this.currentSelectionMode = this.SelectionMode.Row
+		this.currentSelectionMode = SelectionMode.Row
 
 		const selectedRowIndex = parseInt(rowHeaderCell.textContent) - 1;
 
@@ -1115,7 +1089,7 @@ class GridTable {
 
 	selectColumn(columnCell){
 
-		this.currentSelectionMode = this.SelectionMode.Column
+		this.currentSelectionMode = SelectionMode.Column
 
 		const columnIndex = this.indexOf(columnCell);
 
@@ -1172,9 +1146,9 @@ class GridTable {
 		this.last = null;
 		this.resetSelection();
 
-		this.itemCount = this.rows.length;
-		this.prepareVirtualScroll(0, 0, true)
-		this.container.style.height = this.totalContentHeight;
+		this.itemCount = this.filteredIndices.length;
+		this.prepareVirtualScroll(0, true)
+		this.container.style.height = this.totalContentHeight + "px";
 
 		this.alterViewportOffset();
 
@@ -1219,12 +1193,18 @@ class GridTable {
 		this.resizeAnimationFrame = window.requestAnimationFrame(() => this.resizeFrame(e));
 	}
 
-	updateColumnWidths(){
-		this.columnWidths = this.sizeBase.widths
-		this.columnPositions = [0];
+	updateColumnInfo(){
+		this.rowHeaderWidth = this.sizeInfo.widths[0];
+		this.columnWidths = this.sizeInfo.widths.filter((e,i) => i > 0);
+		this.columnPositions = [this.rowHeaderWidth];
 		for (let i = 1; i < this.columnWidths.length; i++) {
 			this.columnPositions.push(this.columnPositions[i - 1] + this.columnWidths[i - 1]);
 		}
+		this.updateColumnValues();
+	}
+
+	updateColumnValues(){
+		this.columnValues = this.sizeInfo.baseData.map(e => Util.uniq(e));
 	}
 
 	keepScroll(direction){
@@ -1338,6 +1318,16 @@ class GridTable {
 
 	onRootScroll(e){
 
+		const left = e.target.scrollLeft;
+		const top = e.target.scrollTop;
+		if(this.scrollPosition.X != left){
+			if(this.dropdown.IsOpened){
+				this.dropdown.close();
+			}
+		}
+		this.scrollPosition.X = left;
+		this.scrollPosition.Y = top;
+
 		if (this.animationFrame) {
 			window.cancelAnimationFrame(this.animationFrame);
 		}
@@ -1347,7 +1337,7 @@ class GridTable {
 
 	onSlidebarMousedown(e){
 		this.isResizing = true;
-		this.currentResizeMode = this.ResizeMode.Column;
+		this.currentResizeMode = ResizeMode.Column;
 		this.resizeFrame = this.resizeColumn;
 		this.lastSliderPosition = e.pageX;
 		this.resizingCell = this.toCellNode(e.target.parentNode);
@@ -1358,7 +1348,7 @@ class GridTable {
 
 	onRowSlidebarMousedown(e){
 		this.isResizing = true;
-		this.currentResizeMode = this.ResizeMode.Row;
+		this.currentResizeMode = ResizeMode.Row;
 		this.resizeFrame = this.resizeRow;
 		this.lastSliderPosition = e.pageY;
 		this.resizingCell = this.toCellNode(e.target.parentNode)
@@ -1375,21 +1365,21 @@ class GridTable {
 		this.isDragging = false;
 		this.resetInterval();
 
-		if(this.currentResizeMode == this.ResizeMode.Row){
-			this.sizeBase.heights[this.resizingCell.Cell.RowIndex] = Util.css(this.resizingCell.Node, "height");
+		if(this.currentResizeMode == ResizeMode.Row){
+			this.sizeInfo.heights[this.resizingCell.Cell.RowIndex] = Util.css(this.resizingCell.Node, "height");
 			this.rowHeaderCellsVirtual[this.rowIndexOf(this.resizingCell.Node)].style.height = Util.css(this.resizingCell.Node, "height")  + "px";
-			this.prepareVirtualScroll(this.viewport.scrollTop, this.viewport.scrollLeft, true);
+			this.prepareVirtualScroll(this.viewport.scrollTop, true);
 			this.container.style.height = this.totalContentHeight + "px";
 			this.alterViewportOffset();
-		}else if(this.currentResizeMode == this.ResizeMode.Column){
-			this.sizeBase.widths[this.resizingCell.Cell.ColumnIndex + 1] = Util.css(this.resizingCell.Node, "width");
+		}else if(this.currentResizeMode == ResizeMode.Column){
+			this.sizeInfo.widths[this.resizingCell.Cell.ColumnIndex + 1] = Util.css(this.resizingCell.Node, "width");
 			this.columnHeaderCells[this.resizingCell.Cell.ColumnIndex].style.width = Util.css(this.resizingCell.Node, "width")  + "px";
-			this.updateColumnWidths();
+			this.updateColumnInfo();
 		}
 
 		if(this.isResizing){
 			this.isResizing = false;
-			this.currentResizeMode = this.ResizeMode.None;
+			this.currentResizeMode = ResizeMode.None;
 			this.resizingCell.Node.classList.remove("noselect");
 			this.viewport.style.cursor = "default";
 		}
@@ -1684,7 +1674,7 @@ class GridTable {
 
 		this.isDragging = true;
 		this.bypassHighlightByScroll = false;
-		this.currentSelectionMode = this.SelectionMode.Cell
+		this.currentSelectionMode = SelectionMode.Cell
 
 		if(e.shiftKey){
 			this.selectByShift(cell);
@@ -1739,13 +1729,55 @@ class GridTable {
 		this.selectColumn(e.target);
 	}
 
-	onColumnHeaderCellDblClick(e){
+	onSortLinkClick(e){
 		e.stopPropagation();
 		this.selectColumn(e.target.parentNode);
-		this.sort(this.indexOf(e.target.parentNode) - 1);
+		const index = this.indexOf(e.target.parentNode) - 1;
+		this.sort(index);
+		this.columnHeaderCells.forEach(e => e.classList.remove("sorted"))
+		e.target.parentNode.classList.add("sorted");
+	}
+
+	onFilterColumnClick(e){
+		e.preventDefault();
+		e.stopPropagation();
+
+		this.toggleDropdown(e);
+	}
+
+	onDropdownClose(index, values){
+
+		if(this.dropdown.isFiltered){
+			if(this.isFiltered){
+				this.undoFilter();
+			}
+			this.columnHeaderCells.forEach(e => e.classList.remove("filtered"));
+			this.columnHeaderCells[index].classList.add("filtered");
+			this.filter(index, values);
+		}else if(this.isFiltered){
+			this.columnHeaderCells.forEach(e => e.classList.remove("filtered"));
+			this.clearFilter();
+		}
+	}
+
+	onDropdownClear(){
+		this.columnHeaderCells.forEach(e => e.classList.remove("filtered"));
+		this.clearFilter();
 	}
 
 	// ---------------------------------
+
+	toggleDropdown(e){
+		const idx = this.indexOf(e.target.parentNode) - 1;
+		const rect = {
+			X:(e.target.parentNode.offsetLeft - this.viewport.scrollLeft) - 3,
+			Y:e.target.parentNode.offsetTop + this.headerHeight + 1,
+			minLeft: this.sizeInfo.widths[0],
+			width: parseInt(e.target.parentNode.style.width.replace("px",""))
+		};
+
+		this.dropdown.open(idx, this.columnValues[idx], rect);
+	}
 
 	beginEdit(value){
 
@@ -1758,7 +1790,7 @@ class GridTable {
 			this.editor.setAttribute("readOnly", "true");
 		}else{
 			this.editor.removeAttribute("readOnly");
-			this.history.begin(this.current, this.current.Node.textContent, this.sizeBase.heights[this.current.Cell.RowIndex]);
+			this.history.begin(this.current, this.current.Node.textContent, this.sizeInfo.heights[this.current.Cell.RowIndex]);
 		}
 
 		this.editor.focus();
@@ -1766,16 +1798,15 @@ class GridTable {
 
 	prepareEditor(value){
 
-		const scrollLeft = this.viewport.scrollLeft;
-		const positionLeft = (this.current.Node.getBoundingClientRect().left - this.viewport.getBoundingClientRect().left) + scrollLeft;
-		const position = { left:positionLeft, top:this.childPositions[this.current.Cell.RowIndex] };
+		const positionLeft = (this.current.Node.getBoundingClientRect().left - this.viewport.getBoundingClientRect().left) + this.viewport.scrollLeft;
+		const positionTop = this.childPositions[this.current.Cell.RowIndex];
 
 		this.inputHolder.style.position = "absolute";
-		this.inputHolder.style.top = position.top + this.headerHeight + "px";
-		this.inputHolder.style.left = position.left + "px";
+		this.inputHolder.style.top = positionTop + this.headerHeight + "px";
+		this.inputHolder.style.left = positionLeft + "px";
 
-		this.editor.style.width = Util.css(this.current.Node, "width") + "px";
-		this.editor.style.height = Util.css(this.current.Node, "height") + "px";
+		this.editor.style.width = this.sizeInfo.widths[this.current.Cell.ColumnIndex + 1] + "px";
+		this.editor.style.height = this.sizeInfo.heights[this.current.Cell.RowIndex] + "px";
 
 		this.editor.value = "";
 		if(value){
@@ -1788,14 +1819,14 @@ class GridTable {
 	endEdit(){
 		this.isEditing = false;
 		this.current.Node.textContent = this.editor.value;
-		this.history.end(this.editor.value, this.sizeBase.heights[this.current.Cell.RowIndex]);
+		this.history.end(this.editor.value, this.sizeInfo.heights[this.current.Cell.RowIndex]);
 		this.initEditor();
 		this.recalculateViewport();
 		this.setFocus();
 	}
 
 	endUndoRedo(memento){
-		this.sizeBase.heights[memento.CellNode.Cell.RowIndex] = memento.height;
+		this.sizeInfo.heights[memento.CellNode.Cell.RowIndex] = memento.height;
 		this.recalculateViewport();
 	}
 
@@ -1827,15 +1858,15 @@ class GridTable {
 
 		const data = value.split("\n");
 		const maxLengthValue = data.reduce((a,b) => Util.compareLength(a,b));
-		let width = Util.getStringWidth(maxLengthValue, false, Util.css(this.viewport, "font")) - 28;
+		let width = Util.getStringWidth(maxLengthValue, false, this.calculationBaseStyles) - 28;
 
 		if(width <= Util.css(this.current.Node, "width")){
 			width = Util.css(this.current.Node, "width");
 		}
 
 		let height = Util.measureHeight(this.calculationBaseStyles, value);
-		if(height > this.sizeBase.heights[this.current.Cell.RowIndex]){
-			this.sizeBase.heights[this.current.Cell.RowIndex] = height;
+		if(height > this.sizeInfo.heights[this.current.Cell.RowIndex]){
+			this.sizeInfo.heights[this.current.Cell.RowIndex] = height;
 		}else{
 			height = this.getChildHeight(this.current.Cell.RowIndex)
 		}
@@ -1844,7 +1875,7 @@ class GridTable {
 	}
 
 	recalculateViewport(){
-		this.prepareVirtualScroll(this.viewport.scrollTop, this.viewport.scrollLeft, true)
+		this.prepareVirtualScroll(this.viewport.scrollTop, true);
 		this.container.style.height = this.totalContentHeight + "px";
 		this.alterViewportOffset();
 	}
@@ -1882,12 +1913,71 @@ class GridTable {
 	}
 
 	closeSearchDialog(){
-		this.table.querySelectorAll(".found").forEach(el => el.classList.remove("found"));
 		this.dialog.classList.remove("open");
 	}
 
 	openSearchDialog(){
 		this.dialog.classList.add("open");
+	}
+
+	filter(columnIndex, value){
+
+		if(this.isFiltered) return;
+
+		this.isFiltered = true;
+		this._prevFilteredIndices = this.filteredIndices;
+		this.filteredIndices = [];
+
+		if(Array.isArray(value)){
+			this._filterByValues(columnIndex, value);
+		}else{
+			this._filterByValue(columnIndex, value);
+		}
+
+		this.resetViewport();
+		this.alterContent();
+	}
+
+	_filterByValue(columnIndex, value){
+
+		this._prevFilteredIndices.forEach((targetIndex, rowIndex) => {
+
+			if(this.rows[targetIndex][columnIndex] == value){
+				this.filteredIndices.push(targetIndex);
+				return false;
+			}
+
+		});
+	}
+
+	_filterByValues(columnIndex, values){
+
+		this._prevFilteredIndices.forEach((targetIndex, rowIndex) => {
+
+			if(values.includes(this.rows[targetIndex][columnIndex])){
+				this.filteredIndices.push(targetIndex);
+				return false;
+			}
+
+		});
+
+	}
+
+	clearFilter(){
+		if(!this.isFiltered) return;
+
+		this.isFiltered = false;
+		this.filteredIndices = this._prevFilteredIndices;
+		this._prevFilteredIndices = [];
+
+		this.resetViewport();
+		this.alterContent();
+	}
+
+	undoFilter(){
+		this.isFiltered = false;
+		this.filteredIndices = this._prevFilteredIndices;
+		this._prevFilteredIndices = [];
 	}
 
 	copyToClipboard(e){
@@ -1905,11 +1995,15 @@ class GridTable {
 			return stringValue;
 		}
 
-		const dataArray = this.currentSelectionMode == this.SelectionMode.All ? [this.header] : [];
+		const dataArray = [];
+
+		if(this.currentSelectionMode == SelectionMode.All){
+			dataArray.push(this.header.map(item => escapeNewLine(item)).join("\t"));
+		}
 
 		for(let row = this.selection.Start.RowIndex; row <= this.selection.End.RowIndex; row++){
 			dataArray.push(
-				this.rows[row].slice(this.selection.Start.ColumnIndex, this.selection.End.ColumnIndex + 1)
+				this.rows[this.filteredIndices[row]].slice(this.selection.Start.ColumnIndex, this.selection.End.ColumnIndex + 1)
 								.map(item => escapeNewLine(item)).join("\t")
 			);
 		}
@@ -1917,40 +2011,6 @@ class GridTable {
 		const clipboardData = e.clipboardData || window.clipboardData || e.originalEvent.clipboardData;
 
 		clipboardData.setData("text/plain" , dataArray.join("\n"));
-	}
-
-	filter(columnIndex, value){
-		if(columnIndex == 0) return;
-
-		if(this.filtered) return;
-
-		this.filtered = true;
-		this._rows = this.rows;
-		this.rows = [];
-
-		this._rows.forEach((row) => {
-
-			row.forEach((item, colindex) => {
-
-				if(colindex == columnIndex && item == value){
-					this.rows.push(row);
-					return false;
-				}
-
-			});
-
-		});
-
-		this.resetViewport();
-	}
-
-	clearFilter(){
-		if(!this.filtered) return;
-
-		this.filtered = false;
-		this.rows = this._rows;
-		this._rows = null;
-		this.resetViewport();
 	}
 
 	export(options){
@@ -1996,28 +2056,37 @@ class GridTable {
 
 	sort(columnIndex){
 
-		if(!this.sortMap[columnIndex]){
-			this.sortMap[columnIndex] = "asc";
-		}
+		this.isSorted = true;
 
-		const ascending = this.sortMap[columnIndex];
-
-		if(ascending === "asc"){
-			this.rows.sort((a,b) => Util.toStringNullSafe(a[columnIndex]).localeCompare(Util.toStringNullSafe(b[columnIndex])));
-			this.sortMap[columnIndex] = "desc";
+		if(this.sortInfo.order == 0){
+			this.columnHeaderCells[this.sortInfo.columnIndex].classList.remove("sorted-asc");
 		}else{
-			this.rows.sort((a,b) => Util.toStringNullSafe(b[columnIndex]).localeCompare(Util.toStringNullSafe(a[columnIndex])));
-			this.sortMap[columnIndex] = "asc";
+			this.columnHeaderCells[this.sortInfo.columnIndex].classList.remove("sorted-desc");
 		}
 
-		this.sizeBase = Util.getSizeBase(this.header, this.rows, this.calculationBaseStyles);
-		this.prepareVirtualScroll(this.viewport.scrollTop, this.viewport.scrollLeft, true);
+		const order = this.sortInfo.order == 0 ? 1 : 0;
+
+		if(order === 0){
+			this.filteredIndices.sort((a,b) => Util.toStringNullSafe(this.rows[a][columnIndex]).localeCompare(Util.toStringNullSafe(this.rows[b][columnIndex])));
+		}else{
+			this.filteredIndices.sort((a,b) => Util.toStringNullSafe(this.rows[b][columnIndex]).localeCompare(Util.toStringNullSafe(this.rows[a][columnIndex])));
+		}
+
+		this.sortInfo.order = order;
+		this.sortInfo.columnIndex = columnIndex;
+		if(this.sortInfo.order == 0){
+			this.columnHeaderCells[this.sortInfo.columnIndex].classList.add("sorted-asc");
+		}else{
+			this.columnHeaderCells[this.sortInfo.columnIndex].classList.add("sorted-desc");
+		}
+
+		const newHeights = this.filteredIndices.map( i => this.sizeBase.heights[i]);
+		this.sizeInfo.heights = newHeights;
+		this.prepareVirtualScroll(this.viewport.scrollTop, true);
 		this.alterViewportOffset();
 		this.updateVirtualSelection();
-		new Array(this.visibleNodesCount)
-			.fill(null)
-			.map((_, index) => this.getRowDataAt(index + this.startNode))
-			.forEach((row, rowIndex) => this.changeRowValue(row, rowIndex, true));
+		this.alterContent(true);
+
 	}
 
 	destroy(){
@@ -2195,7 +2264,7 @@ class EditHistory{
 
 }
 
-class Util{
+export class Util{
 
 	static css(element, className){
 
@@ -2286,7 +2355,38 @@ class Util{
 		return result
 	}
 
+	static uniq(array) {
+		return Array.from(new Set(array));
+	}
+
+	static getType(array){
+		const nonObjectArray = array.filter(e => typeof e != "object");
+		if(nonObjectArray.length > 0){
+			return nonObjectArray.reduce((_,e) => typeof e);
+		}else{
+			return "object";
+		}
+	}
+
+	static convert(value, type){
+		if(type === "string"){
+			return this.toStringNullSafe(value);
+		}
+
+		if(type === "number"){
+			return Number(value);
+		}
+
+		if(type === "boolean"){
+			return value === 'true';
+		}
+
+		return value;
+	}
+
 	static transpose(array) {
+		if(array.length <= 0) return array;
+
 		return Object.keys(array[0]).map(key => {
 			return array.map(item => {
 				return item[key];
@@ -2295,7 +2395,7 @@ class Util{
 	}
 
 	static reduceString(array){
-		return this.transpose(array).map(item => item.reduce(this.compareLength.bind(this)));
+		return array.reduce(this.compareLength.bind(this));
 	}
 
 	static compareLength(a, b){
@@ -2305,16 +2405,16 @@ class Util{
 		return this.getByteLength(left) > this.getByteLength(right) ? left : right;
 	}
 
-	static getStringWidth(text, padding, font){
+	static getStringWidth(text, addPadding, styles){
 		const canvas = this.getStringWidth.canvas || (this.getStringWidth.canvas = document.createElement("canvas"));
 		const context = canvas.getContext("2d");
-		context.font = font;
+		context.font = styles.font;
 		const metrics = context.measureText(text);
 
-		if(padding){
-			return metrics.width + 32;
+		if(addPadding){
+			return parseInt(metrics.width + 32 + styles.padding);
 		}else{
-			return metrics.width + 20;
+			return parseInt(metrics.width + 20);
 		}
 	}
 
@@ -2336,12 +2436,15 @@ class Util{
 			return item.reduce(this.reduceRowHeights.bind(this), this.styles.baseHeight);
 		});
 
-		const _numberColumnWidth = this.getStringWidth(rows.length, false, this.styles.font);
-		const _maxLengthValues = this.reduceString([header].concat(rows));
+		const _numberColumnWidth = this.getStringWidth(rows.length, false, this.styles);
+		const baseData = this.transpose(rows);
+		const allData = header.map((e,i) => [e].concat(baseData[i]));
+		const _maxLengthValues = allData.map(item => item.reduce(this.compareLength.bind(this)));
 
 		return {
-			widths: [_numberColumnWidth].concat(_maxLengthValues.map(item => this.getStringWidth(item, true, this.styles.font))),
-			heights: heightBases
+			widths: [_numberColumnWidth].concat(_maxLengthValues.map(item => this.getStringWidth(item, true, this.styles))),
+			heights: heightBases,
+			baseData: baseData
 		};
 	}
 
