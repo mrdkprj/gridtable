@@ -279,7 +279,7 @@ export default class GridTable {
 		const getSearchDialog = () => {
 			const dialog = document.createElement("div");
 			dialog.classList.add("dialog");
-			dialog.style.top = (this.headerHeight + 1) + "px";
+			dialog.style.top = "0px";
 			dialog.style.right = "20px";
 			const txt = document.createElement("textarea");
 			txt.spellcheck = false;
@@ -578,7 +578,7 @@ export default class GridTable {
 
 		switch(args.direction){
 			case Direction.End:
-				row = this.visibleNodes[this.visibleNodes.length - 2];
+				row = this.visibleNodes[this.visibleNodes.length - 1];
 				cell = row.childNodes[row.childNodes.length - 1]
 				break;
 			case Direction.Home:
@@ -598,7 +598,7 @@ export default class GridTable {
 				cell = row.childNodes[this.indexOf(args.anchor.Node)];
 				break;
 			case Direction.Down:
-				row = this.visibleNodes[this.visibleNodes.length - 2];
+				row = this.visibleNodes[this.visibleNodes.length - 1];
 				cell = row.childNodes[this.indexOf(args.anchor.Node)];
 				break;
 		}
