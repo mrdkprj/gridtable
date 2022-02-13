@@ -7,7 +7,8 @@ export default class Dropdown{
 		this.container.classList.add("filter-dropdown");
 		this.container.style.display = "none";
 		this.container.setAttribute("tabindex", "0");
-		this.container.addEventListener("blur", this.onBlur.bind(this));
+		this.container.addEventListener("blur", this._onBlur.bind(this));
+		this.container.addEventListener("keydown", this._onKeydown.bind(this));
 		this.filterArea = document.createElement("div");
 		this.filterArea.classList.add("filter-dropdown-area");
 		this.filterAreaStyles = {
@@ -31,7 +32,7 @@ export default class Dropdown{
 
 		this.dropdownArea = document.createElement("div");
 		this.dropdownArea.classList.add("dropdown");
-		this.dropdownArea.addEventListener("scroll", this.onScroll.bind(this));
+		this.dropdownArea.addEventListener("scroll", this._onScroll.bind(this));
 
 		this.options = document.createElement("ul");
 		this.options.classList.add("options");
@@ -108,7 +109,7 @@ export default class Dropdown{
 		this.IsOpened = true;
 		this.currentColumnIndex = index;
 		this.values = Array.from(values);
-		this.values.unshift("Select All");
+		this.values.unshift("(Select All)");
 		this.itemCount = this.values.length;
 		this.selectedValues = [];
 
@@ -288,12 +289,12 @@ export default class Dropdown{
 	}
 
 
-	onScroll(e){
+	_onScroll(e){
 		if (this.animationFrame) {
 			window.cancelAnimationFrame(this.animationFrame);
 		}
 
-		this.animationFrame = window.requestAnimationFrame(() => this.doVirtualScroll(e));
+		this.animationFrame = window.requestAnimationFrame(() => this._doVirtualScroll(e));
 	}
 
 	_prepareVirtualScroll(scrollTop, reset){
@@ -317,7 +318,7 @@ export default class Dropdown{
 	}
 
 
-	doVirtualScroll(e){
+	_doVirtualScroll(e){
 
 		this._prepareVirtualScroll(e.target.scrollTop, false);
 
@@ -338,11 +339,19 @@ export default class Dropdown{
 
 	}
 
-	onBlur(e){
+	_onBlur(e){
 
 		if(!this.container.contains(e.relatedTarget)){
 			this.close();
 		}
+	}
+
+	_onKeydown(e){
+
+		if(this.IsOpened && this.isFiltered && e.key == "c"){
+			this.clear();
+		}
+
 	}
 
 }

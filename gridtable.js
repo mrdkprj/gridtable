@@ -44,7 +44,7 @@ export default class GridTable {
 		}
 
 		this.baseRowHeight = 22;
-		this.headerHeight = 28;
+		this.headerHeight = 27;
 		this.itemCount = this.rows.length;
 		this.totalContentHeight = 0;
 		this.childPositions = null;
